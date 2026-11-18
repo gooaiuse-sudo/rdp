@@ -1,0 +1,77 @@
+name: Windows Remote Desktop (6 Hours)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  windows-rdp:
+    runs-on: windows-latest
+    timeout-minutes: 355
+
+    steps:
+      - name: Setup Superfast Windows noVNC + Cloudflare
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          # 1. Disable visual effects / animations for zero lag
+          Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "UserPreferencesMask" -Value ([byte[]](0x90,0x12,0x03,0x80,0x10,0x00,0x00,0x00)) -ErrorAction SilentlyContinue
+          Set-ItemProperty -Path "HKCU:\Control Panel\Desktop\WindowMetrics" -Name "MinAnimate" -Value "0" -ErrorAction SilentlyContinue
+
+          # 2. Download & Silently Install TightVNC Server (Password: 12345678)
+          curl.exe -fsSL "https://www.tightvnc.com/download/2.8.11/tightvnc-2.8.11-gpl-setup-64bit.msi" -o "$env:TEMP\tightvnc.msi"
+          $msiArgs = @(
+            "/i", "`"$env:TEMP\tightvnc.msi`"",
+            "/qn", "/norestart",
+            "ADDLOCAL=Server",
+            "SERVER_REGISTER_AS_SERVICE=1",
+            "SERVER_ADD_FIREWALL_EXCEPTION=1",
+            "SET_USEVNCAUTHENTICATION=1",
+            "VALUE_OF_USEVNCAUTHENTICATION=1",
+            "SET_PASSWORD=1",
+            "VALUE_OF_PASSWORD=12345678",
+            "SET_USECONTROLAUTHENTICATION=1",
+            "VALUE_OF_USECONTROLAUTHENTICATION=1",
+            "SET_CONTROLPASSWORD=1",
+            "VALUE_OF_CONTROLPASSWORD=12345678"
+          )
+          Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -NoNewWindow
+
+          # 3. Set AllowLoopback = 1 WITHOUT wiping existing Password key
+          if (-not (Test-Path "HKLM:\SOFTWARE\TightVNC\Server")) {
+            New-Item -Path "HKLM:\SOFTWARE\TightVNC\Server" -Force | Out-Null
+          }
+          Set-ItemProperty -Path "HKLM:\SOFTWARE\TightVNC\Server" -Name "AllowLoopback" -Value 1 -Type DWord
+          Restart-Service -Name "tvnserver" -Force
+          Start-Sleep -Seconds 2
+
+          # 4. Install noVNC + websockify
+          git clone --depth 1 -q https://github.com/novnc/noVNC.git C:\noVNC
+          pip install -q websockify
+          Start-Process -FilePath "python" -ArgumentList "-m websockify --web C:\noVNC 6080 127.0.0.1:5900" -WindowStyle Hidden
+
+          # 5. Start Cloudflare Tunnel
+          curl.exe -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -o C:\cloudflared.exe
+          Start-Process -FilePath "C:\cloudflared.exe" -ArgumentList "tunnel --url http://127.0.0.1:6080 --logfile C:\cf.log" -WindowStyle Hidden
+
+          # 6. Wait and print fast-mode link
+          $url = $null
+          for ($i = 0; $i -lt 20; $i++) {
+            Start-Sleep -Seconds 2
+            if (Test-Path C:\cf.log) {
+              $match = Select-String -Path C:\cf.log -Pattern "https://[a-zA-Z0-9.-]+\.trycloudflare\.com"
+              if ($match) {
+                $url = $match.Matches[0].Value
+                break
+              }
+            }
+          }
+
+          Write-Host "=========================================================="
+          Write-Host "WINDOWS DESKTOP LINK (Fast Mode):"
+          Write-Host "$url/vnc.html?autoconnect=true&resize=remote&quality=4&compression=6"
+          Write-Host "PASSWORD: 12345678"
+          Write-Host "=========================================================="
+
+          # 7. Keep alive for ~6 hours
+          Start-Sleep -Seconds 21000
