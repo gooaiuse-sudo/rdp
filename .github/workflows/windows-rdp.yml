@@ -18,7 +18,7 @@ jobs:
           Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "UserPreferencesMask" -Value ([byte[]](0x90,0x12,0x03,0x80,0x10,0x00,0x00,0x00)) -ErrorAction SilentlyContinue
           Set-ItemProperty -Path "HKCU:\Control Panel\Desktop\WindowMetrics" -Name "MinAnimate" -Value "0" -ErrorAction SilentlyContinue
 
-          # 2. Download & Silently Install TightVNC Server (Password: 12345678)
+          # 2. Download & Silently Install TightVNC Server (Allow Loopback + Password: 12345678)
           curl.exe -fsSL "https://www.tightvnc.com/download/2.8.11/tightvnc-2.8.11-gpl-setup-64bit.msi" -o "$env:TEMP\tightvnc.msi"
           $args = @(
             "/i", "`"$env:TEMP\tightvnc.msi`"",
@@ -26,6 +26,8 @@ jobs:
             "ADDLOCAL=Server",
             "SERVER_REGISTER_AS_SERVICE=1",
             "SERVER_ADD_FIREWALL_EXCEPTION=1",
+            "SET_ALLOWLOOPBACK=1",
+            "VALUE_OF_ALLOWLOOPBACK=1",
             "SET_USEVNCAUTHENTICATION=1",
             "VALUE_OF_USEVNCAUTHENTICATION=1",
             "SET_PASSWORD=1",
